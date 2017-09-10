@@ -100,7 +100,7 @@ for($i = 1; $i <= $StartIndividuals; $i++){
         my $gene = rand(100);
         if($gene <= $Alphas){
             push(@ABOgene, "A"); #alpha
-        }elsif($gene <= $Betas){
+        }elsif($gene <= $Betas + $Alphas){
             push(@ABOgene, "B"); #beta
         }else{
             push(@ABOgene, "O"); #omega
@@ -279,6 +279,9 @@ sub Outstat {
             #ヘッダ生成
             #print Dumper $stats;
             if ($year eq 0){
+                #引数の記述
+                print OUT "#./omegaversepl -i $StartIndividuals -a $Alphas -b $Betas -c $Omegas -g $Model -m $MateModel -y $opts{y}\n";
+                #ヘッダ
                 print OUT "#year\tTotal\t";
                 foreach my $key (sort(keys($stats))){
                     foreach my $stat (sort(keys(%$stats{$key}))){
@@ -526,8 +529,12 @@ sub Death {
         #つがい死亡時の処理(betaなら0に、それ以外は負数に(Matestatus用の処理))
         next if $old_mate eq 0;
         unless(defined($hash{$old_mate})){
-            $$out{$id}{matenum} = 0 if $$out{$id}{omegatype} eq "Beta";
-            $$out{$id}{matepair} = 0 if $$out{$id}{omegatype} eq "Beta";
+            if($$out{$id}{omegatype} eq "Beta"){
+                $$out{$id}{matenum} = 0;
+                $$out{$id}{matepair} = 0;
+                my $status = &Matestatus(%$out{$id});
+                $$out{$id}{status} = $status;
+            }
         }else{
             $$out{$id}{matenum} = $hash{$old_mate};
         }
