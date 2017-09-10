@@ -1,17 +1,24 @@
 #!/usr/bin/perl
-use warnings;
+#use warnings;
 use Data::Dumper;
 use Getopt::Std;
 use Config::Tiny;
 use Time::HiRes;
 
-#引数指定：初期個体数、各遺伝子頻度、交配様式の指定、時系列の出力ファイル
+#引数指定###############################################################
+#-i:初期個体数 default:10000
+#-a, -b, -o :初期ω遺伝子頻度(整数比で指定可, default: a:b:o = 2:4:1)
+#-g:ω遺伝子モデルの指定(default:GeneModel1, サブルーチンOmegatypeを参照)
+#-m:繁殖モデルの指定(default:MateModel1, サブルーチンMatingを参照)
+#-o:出力ファイルの指定
+#-y:経過年数の指定(default:1)
+
 my %opts = ();
 getopts("i:a:b:o:g:f:y:m:", \%opts);
-my $StartIndividuals = $opts{i};
-my $Alphas = $opts{a};
-my $Betas = $opts{b};
-my $Omegas = $opts{o};
+my $StartIndividuals = $opts{i} //= 10000;
+my $Alphas = $opts{a} //= 2; 
+my $Betas = $opts{b} //= 4;
+my $Omegas = $opts{o} //= 1;
 my $Model = $opts{g} //= "GeneModel1" ;
 my $MateModel = $opts{m} //= "MateModel1" ;
 my $output = $opts{f};
@@ -23,7 +30,12 @@ $Alphas = $Alphas / $all * 100;
 $Betas = $Betas / $all * 100;
 $Omegas = $Omegas / $all * 100;
 
-#同一ディレクトリ内の設定ファイル読み込み
+#同一ディレクトリ内の設定ファイル(omegaverse.ini)読み込み###################
+#1.omegaverse.ini:初期集団の年齢構成および繁殖設定ファイル(引数に組み込み予定)
+#2.primes.txt    :素数列(各個体の識別および血縁度判定用の数値)
+#3.mortality.txt :死力表(各個体の死亡判定用)
+#上２つは現時点では無駄な処理なので今後修正予定
+
 my $cabin = $0;
 $cabin =~ s/omegaverse\.pl$//;
 my $inicabin = $cabin . "omegaverse.ini";
@@ -35,8 +47,6 @@ unless(-e $inicabin){
     $init = Config::Tiny -> read("$inicabin");
 }
 
-#各個体のプロファイル作成
-my $Omegaverse;
 #ID用の素数列読み込み
 my $prime = $0;
 $prime =~ s/omegaverse\.pl$//;
@@ -50,6 +60,24 @@ while(<PR>){
     push(@primes, $_);
     last if $c == $StartIndividuals + 1;
 }
+
+#死亡判定用の死力表読み込み(平成２２年度完全生命表)
+my $mortality = $0;
+$mortality =~ s/omegaverse\.pl$/mortality.txt/;
+open(MOR, "<$mortality") or die;
+my %death_XX;
+my %death_XY;
+while(<MOR>){
+    s/\r|\n//g;
+    my @line = split("\t", $_);
+    $death_XY{$line[0]} = $line[1];
+    $death_XX{$line[0]} = $line[2];
+}
+close(MOR);
+
+#初期集団生成#################################################
+#各個体のプロファイル作成
+my $Omegaverse;
 #個体ごとの処理
 for($i = 1; $i <= $StartIndividuals; $i++){
     my %Individual;
@@ -113,29 +141,36 @@ for($i = 1; $i <= $StartIndividuals; $i++){
     $Omegaverse->{$i} =  \%Individual;
 }
 
-#初期状態のカウント
+#初期状態出力
 print "---Inital State---\n";
 &IndvidualStat();
+&Outstat("0","stat");
 print "------------------\n";
 #print Dumper $Omegaverse;
 
-#つがいの形成
-#無作為に2個体抽出して番わせる
-#人口千人比の婚姻率が5パーセント・出生率7パーセント前後になる程度に調整
-#経過年数
+#メイン処理##########################################################
+#-yでの指定年数間、多次元配列Omegaverseに対してmating-birth-deathの処理を反復
+#IndividualStatで画面に統計出力、Outstatでtsvファイルに出力
+#
+#1.Mating:無作為に2個体抽出→交配状態・遺伝子型・出生率調整に基づきつがい判定
+#2.Birth :つがい形成した個体の情報から子のデータ生成、Omegaverseに追加
+#3.Death :年齢に基づき死亡判定、生存個体のみをOmegaverseに追加、
+#         Beta個体の死亡したつがい情報を削除(alhpa, omegaは固定)
+#
+#1.2.は人口千人比の婚姻率が5パーセント・出生率7パーセント前後になる程度に調整(omegaverse.ini参照)
 for($k = 1; $k <= $year; $k++){
     #結婚処理
     $Omegaverse = &Mating($Omegaverse);
     #繁殖処理
-    &Generation($Omegaverse);
-    &IndvidualStat();
+    &Birth($Omegaverse);
     #死亡・生存処理
+    $Omegaverse = &Death($Omegaverse);
+    &IndvidualStat();
+    #経過出力
+    &Outstat($k,"stat");
 }
 
-
-#一年進ませて、平均余命から死亡判定
-
-######################################
+#メイン処理終了, 以下サブルーチン#####################################
 
 #個体群の統計値モニタリング
 sub IndvidualStat {
@@ -206,23 +241,71 @@ sub IndvidualStat {
 }
 #ファイル出力
 sub Outstat {
-    open(OUT, ">$output");
-        #header
-        my @head = sort (keys(%$Omegaverse{$primes[0]}));
-        print OUT "#";
-        foreach my $head (@head){
-            print OUT "$head\t";
-        }
-        print OUT "\n";
-        foreach my $id (@primes){
-            foreach my $elem (sort keys(%$Omegaverse{$id})){
-                print OUT "$$Omegaverse{$id}{$elem}\t";
+        my $mode = $_[1] //= "stat";
+        my $year = $_[0] //= "1";
+        my $style = $_[2] //= "per";
+
+        #全個体のデータ出力        
+        if($mode eq "mass"){
+            open(OUT, ">>$output");
+            #header
+            my @head = sort (keys(%$Omegaverse{1}));
+            print OUT "#";
+            foreach my $head (@head){
+             print OUT "$head\t";
+            }
+            print OUT "year\n";
+            foreach my $id (sort keys(%$Omegaverse)){
+                foreach my $elem (sort keys(%$Omegaverse{$id})){
+                    print OUT "$$Omegaverse{$id}{$elem}\t";
+                }
+                print OUT "$year\n";
+            }
+
+        #現時点の個体群の統計出力
+        }elsif($mode eq "stat"){
+            open(OUT, "+>>$output");
+            #集計処理
+            my $stats;
+            foreach my $id (keys($Omegaverse)){
+                foreach my $key (keys(%$Omegaverse{$id})){
+                next if $key =~ /ID|age|mate|code/;
+                my $type = $$Omegaverse{$id}{$key};
+                $$stats{$key}{$type} //= 0;
+                my $num = $$stats{$key}{$type} + 1;
+                $$stats{$key}{$type} = $num;
+                }
+            }
+            #ヘッダ生成
+            #print Dumper $stats;
+            if ($year eq 0){
+                print OUT "#year\tTotal\t";
+                foreach my $key (sort(keys($stats))){
+                    foreach my $stat (sort(keys(%$stats{$key}))){
+                        print OUT "$stat\t";
+                    }
+                }
+                print OUT "\n";
+            }
+            #出力(デフォルトはパーセンテージ)
+            my @population = keys($Omegaverse);
+            my $total = @population;
+            print OUT "$year\t$total\t";
+            foreach my $key (sort(keys($stats))){
+                foreach my $stat (sort(keys(%$stats{$key}))){
+                    my $out = $$stats{$key}{$stat};
+                    if ($style eq "per"){
+                        my $per = $out / $total * 100;
+                        $out = sprintf("%.2f", $per);
+                    }
+                    print OUT "$out\t";
+                }
             }
             print OUT "\n";
         }
-    close(OUT);
+    #close(OUT);
 }
-#オメガ表現型判定(設定モデルごと)
+#オメガ表現型判定(既存・新規モデルごとに編集)
 sub Omegatype {
     my $in = $_[0];
     my %input = %$in;
@@ -259,6 +342,7 @@ sub Matestatus {
     #閉経後は繁殖不可
     $status = 0 if ($input{omegatype} =~ /O/ and $input{age} > $init->{mating}->{menopause});
     $status = 0 if ($input{XYtype} =~ /XX/ and $input{age} > $init->{mating}->{menopause});
+    $status = 0 if ($input{XYtype} =~ /XY/ and $input{age} > $init->{mating}->{menopause});
     #つがいが確定している個体は繁殖不可
     $status = 0 unless ($input{matepair} eq 0);
     return($status);
@@ -281,7 +365,7 @@ sub Mating {
         while($mate1 == $mate2){
             $mate2 = int(rand($population)+0.5);
         }
-        #$test_num++; #debug
+
         #statusに基づき交配可能判定
         next if $$in{$mate1}{status} eq 0;
         next if $$in{$mate2}{status} eq 0;
@@ -330,7 +414,7 @@ sub Mating {
         #出生率調整
         my $birth_fate = rand(1);
         next if $birth_fate > $init->{mating}->{birth_rate};
-        $birth_success++;
+        #$birth_success++;
     }
     #結婚率出力
     my $mating_rate = $mate_success / $population * 1000;
@@ -338,20 +422,15 @@ sub Mating {
     print "Mating rate: $mating_rate\n";
     return($in);
 
-    #出生率出力
-    #my $birth_rate = $birth_success / $population * 1000;
-    #$birth_rate = sprintf("%.2f", $birth_rate);
-    #print "Birth rate: $birth_rate\n";
-
-    #print Dumper $mate_success / $test_num; 
 }
 
-#与えられた2数を素因数分解して、共通する因数の個数を返す
+#血縁度処理（与えられた2数を素因数分解して、共通する因数の個数を返す）
 sub Kindred {
-#test.plで開発中
+#開発中止
 }
-#親の情報から子供の情報生成、omegaverseに追加
-sub Generation {
+
+#つがいの情報から子供の情報生成、omegaverseに追加
+sub Birth {
     my $in = $_[0];
     my @pop = sort keys(%$in);
     my $population = @pop;
@@ -405,34 +484,54 @@ sub Generation {
         $Omegaverse->{$population} = \%child;
     }
 }
-#各集団の年齢に1歳加える、交配ステータス処理(0→1、2→1)
-#年齢および遺伝子型(YY)から一定確率で死亡判定、通し番号を整理して欠番をゼロに
+
+#死亡判定・Omegaverseの通し番号整理・Betaのつがい処理
 sub Death {
-#死亡者の相手のmate pairを空欄にする
-#betaの場合はstatus解除(つがいでないため)
+    my $out;
+    my $in = $_[0];
+    my @pop = sort keys(%$in);
+    my $new_id = 0;
+    my %hash;
+    foreach my $id (sort keys($in)){
+        my %Individual;
+
+        #死亡処理：男女別に死力表読み込み生成乱数から処理
+        my $age= $$in{$id}{age} + 1;
+        my $die = rand(1);
+        if($$in{$id}{XYcode} eq 1){
+            next if $die < $death_XX{$age};
+        }elsif($$in{$id}{XYcode} eq 0){
+            next if $die < $death_XY{$age};
+        #YY個体は致死
+        }else{
+            next;
+        }
+        #各種項目をコピー
+        foreach my $key (keys(%$in{$id})){
+            $Individual{$key} = $$in{$id}{$key};
+        }
+        #交配可能判定(status:2はここでリセット)
+        my $status = &Matestatus(\%Individual);
+        $Individual{status} = $status;
+
+        #新規個体群表に代入
+        $new_id++;
+        $hash{$id} = $new_id;
+        $out->{$new_id} = \%Individual;
+    }
+
+    #matenumの旧idから新idの付け替え(たぶんもっと上手い方法がある)
+    foreach my $id (sort keys($out)){
+        my $old_mate = $$out{$id}{matenum};
+        #つがい死亡時の処理(betaなら0に、それ以外は負数に(Matestatus用の処理))
+        next if $old_mate eq 0;
+        unless(defined($hash{$old_mate})){
+            $$out{$id}{matenum} = 0 if $$out{$id}{omegatype} eq "Beta";
+            $$out{$id}{matepair} = 0 if $$out{$id}{omegatype} eq "Beta";
+        }else{
+            $$out{$id}{matenum} = $hash{$old_mate};
+        }
+    }
+    return($out);
 }
 #####################################
-
-
-#課題：配偶子生成と遺伝子型の優劣
-#表現型ルール、独立・連鎖ルール・交配ルール
-#個体間の血縁度の実装
-#年齢・性別・オメガ性別
-#つがい状態：交配可・交配不可
-#年齢
-#遺伝子型ルールと交配ルール
-#初期集団は同じで、交配ルールだけ変えた試行を行う（forkするかしないかは別）
-#交配ルーチン
-#ターン制
-#発生・死亡判定
-#1.交配させるインスタンスを選択
-#2.交配様式に従い交配の成否を決定（結果主義）
-#3.交配集団に新規個体の追加
-#####################################
-#以下交配様式のサブルーチン
-#交配可能年齢の処理
-#
-#XY性別、ABO性別に対しての処理
-#配偶子の組み合わせ
-#alpha-alpha/alpha-beta/alpha-omega/beta-beta/beta-omega/omega-omega/
-#XY-XX/XY-XY/XX-XX
