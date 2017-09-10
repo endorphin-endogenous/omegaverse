@@ -1,5 +1,5 @@
-# omegaverse
-for omegaverse genetics project
+# omegaverse.pl
+for omegaverse genetics project  
 (以下執筆中)  
 目的：オメガバース遺伝学のシミュレーション  
   
