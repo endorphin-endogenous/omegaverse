@@ -165,6 +165,9 @@ for($k = 1; $k <= $year; $k++){
     &Birth($Omegaverse);
     #死亡・生存処理
     $Omegaverse = &Death($Omegaverse);
+    my $chr = length($k);
+    $chr = "0" x (4 - $chr) . $k;
+    print "---year:$chr------\n";
     &IndvidualStat();
     #経過出力
     &Outstat($k,"stat");
@@ -346,8 +349,7 @@ sub Matestatus {
     $status = 0 if ($input{omegatype} =~ /O/ and $input{age} > $init->{mating}->{menopause});
     $status = 0 if ($input{XYtype} =~ /XX/ and $input{age} > $init->{mating}->{menopause});
     $status = 0 if ($input{XYtype} =~ /XY/ and $input{age} > $init->{mating}->{menopause});
-    #つがいが確定している個体は繁殖不可
-    $status = 0 unless ($input{matepair} eq 0);
+
     return($status);
 }
 
@@ -392,9 +394,20 @@ sub Mating {
                 #一方がAでないと子供は生まれない
                 next if ($materesult_omega =~ /0|1|4/);
             }
-        #MateModel2
+        #MateModel2(男性O-O, 女性A-Aを許容)
         }elsif($MateModel eq "MateModel2"){
-            exit;
+            #同性かつアルファまたはオメガが無いケース,両方がアルファまたはオメガのケースを除外
+            if($materesult_XY eq 0){ #XY-XYの場合
+                #同性betaを除外
+                next if($$in{$mate1}{omegacode} * $$in{$mate2}{omegacode} eq 1);
+                #少なくとも一方がOでなければ子供は生まれない
+                next if($materesult_omega =~ /3|4/);
+            }elsif($materesult_XY eq 2){  #XX-XXの場合
+                #同性betaを除外
+                next if($$in{$mate1}{omegacode} * $$in{$mate2}{omegacode} eq 1);
+                #少なくとも一方がAでないと子供は生まれない
+                next if ($materesult_omega =~ /0|1/);
+            }
         #エラー処理
         }else{
             print "[ERROR]:'$MateModel' is not supported mating model\n";
@@ -459,10 +472,10 @@ sub Birth {
 
         #子供の遺伝子型生成
         #XY
-        my $XY_1 = $in{$id}{XYtype};
-        my $XY_2 = $in{pair_id}{XYtype};
-        my $gamete_xy_1 = substr($$in{$id}{XYtype}, int(rand(1)+1), 1);
-        my $gamete_xy_2 = substr($$in{$pair_id}{XYtype}, int(rand(1)+1) ,1);
+        my $XY_1 = $$in{$id}{XYtype};
+        my $XY_2 = $$in{$pair_id}{XYtype};
+        my $gamete_xy_1 = substr($XY_1, int(rand(1)+0.5), 1);
+        my $gamete_xy_2 = substr($XY_2, int(rand(1)+0.5), 1);
         my @gamete_xy = ($gamete_xy_1, $gamete_xy_2);
         @gamete_xy = sort{$a cmp $b} @gamete_xy;
         $child{XYtype} = join("",@gamete_xy);
@@ -470,10 +483,10 @@ sub Birth {
         $child{XYcode} = $code_xy{$child{XYtype}};
 
         #ABO
-        my $ABO_1 = $in{$id}{ABO};
-        my $ABO_2 = $in{pair_id}{ABO};
-        my $gamete_abo_1 = substr($$in{$id}{ABO}, int(rand(1)+1), 1);
-        my $gamete_abo_2 = substr($$in{$pair_id}{ABO}, int(rand(1)+1) ,1);
+        my $ABO_1 = $$in{$id}{ABO};
+        my $ABO_2 = $$in{$pair_id}{ABO};
+        my $gamete_abo_1 = substr($ABO_1, int(rand(1)+0.5), 1);
+        my $gamete_abo_2 = substr($ABO_2, int(rand(1)+0.5), 1);
         my @gamete_abo = ($gamete_abo_1, $gamete_abo_2);
         @gamete_abo = sort{$a cmp $b} @gamete_abo;
         $child{ABO} = join("", @gamete_abo);
