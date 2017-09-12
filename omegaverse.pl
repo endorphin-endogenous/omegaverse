@@ -4,7 +4,7 @@ use Data::Dumper;
 use Getopt::Std;
 use Config::Tiny;
 use Time::HiRes;
-
+#動作要件：perl 5.20.2 および上記モジュール
 #引数指定###############################################################
 #-i:初期個体数 default:10000
 #-a, -b, -o :初期ω遺伝子頻度(整数比で指定可, default: a:b:o = 2:4:1)
