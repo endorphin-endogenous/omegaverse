@@ -558,6 +558,7 @@ sub Death {
         }else{
             next;
         }
+        $$in{$id}{age} = $age;
         #各種項目をコピー
         foreach my $key (keys(%$in{$id})){
             $Individual{$key} = $$in{$id}{$key};
