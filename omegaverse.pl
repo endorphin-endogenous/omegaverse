@@ -4,7 +4,7 @@ use Data::Dumper;
 use Getopt::Std;
 use Config::Tiny;
 use Time::HiRes;
-#動作要件：perl 5.20.2 および上記モジュール
+
 #引数指定###############################################################
 #-i:初期個体数 default:10000
 #-a, -b, -o :初期ω遺伝子頻度(整数比で指定可, default: a:b:o = 2:4:1)
@@ -270,27 +270,57 @@ sub Outstat {
             open(OUT, "+>>$output");
             #集計処理
             my $stats;
+            #年齢初期値
+            my %ages;
+            for($a = 0; $a < 12; $a++){
+                my $b = $a * 10;
+                $ages{$b} = 0;
+            }
+
             foreach my $id (keys($Omegaverse)){
                 foreach my $key (keys(%$Omegaverse{$id})){
-                next if $key =~ /ID|age|mate|code/;
-                my $type = $$Omegaverse{$id}{$key};
-                $$stats{$key}{$type} //= 0;
-                my $num = $$stats{$key}{$type} + 1;
-                $$stats{$key}{$type} = $num;
-                }
-            }
-            #ヘッダ生成
-            #print Dumper $stats;
-            if ($year eq 0){
-                #引数の記述
-                print OUT "#./omegaversepl -i $StartIndividuals -a $Alphas -b $Betas -c $Omegas -g $Model -m $MateModel -y $opts{y}\n";
-                #ヘッダ
-                print OUT "#year\tTotal\t";
-                foreach my $key (sort(keys($stats))){
-                    foreach my $stat (sort(keys(%$stats{$key}))){
-                        print OUT "$stat\t";
+                    #年齢以外の処理
+                    unless($key =~ /ID|age|mate|code|status/){
+                        my $type = $$Omegaverse{$id}{$key};
+                        $$stats{$key}{$type} //= 0;
+                        my $num = $$stats{$key}{$type} + 1;
+                        $$stats{$key}{$type} = $num;
+                    #年齢処理(10歳ごと)
+                    }elsif($key =~ /age/){
+                        my $age = $$Omegaverse{$id}{$key};
+                        $age = int($age / 10) * 10;
+                        my $num = $ages{$age} + 1;
+                        $ages{$age} = $num;
+                    }elsif($key =~ /status/){
+                        $$stats{$key}{"+"} //= 0;
+                        $$stats{$key}{"-"} //= 0;
+                        my $breed   = $$stats{$key}{"+"};
+                        my $unbreed = $$stats{$key}{"-"};
+                        $$stats{$key}{"+"} =$breed   +1 if $$Omegaverse{$id}{$key} eq 1;
+                        $$stats{$key}{"-"} =$unbreed +1 if $$Omegaverse{$id}{$key} eq 0;
+                    }else{
+                        next;
                     }
                 }
+            }
+            $stats->{age} = \%ages;
+            #print Dumper %$stats{age};
+
+            #ヘッダ生成
+            #print Dumper $stats;
+            my @ages = keys(%ages);
+            @ages = sort {$a <=> $b} @ages;
+            if ($year eq 0){
+                #引数の記述(17/9/17Rscriptでのグラフ出力の妨げになるため除去)
+                #print OUT "#./omegaversepl -i $StartIndividuals -a $Alphas -b $Betas -c $Omegas -g $Model -m $MateModel -y $opts{y}\n";
+                #ヘッダ
+                print OUT "year\tTotal\t";
+                foreach my $key (sort(keys($stats))){
+                    foreach my $stat (sort(keys(%$stats{$key}))){
+                        print OUT "$stat\t" unless $key eq "age";
+                    }
+                }
+                print OUT join("\t", @ages);
                 print OUT "\n";
             }
             #出力(デフォルトはパーセンテージ)
@@ -304,8 +334,14 @@ sub Outstat {
                         my $per = $out / $total * 100;
                         $out = sprintf("%.2f", $per);
                     }
-                    print OUT "$out\t";
+                    print OUT "$out\t" unless $key eq "age";
                 }
+            }
+            foreach my $class (@ages){
+                my $outage = $$stats{age}{$class};
+                $outage = $outage / $total * 100;
+                $outage = sprintf("%.2f", $outage);
+                print OUT "$outage\t";
             }
             print OUT "\n";
         }
